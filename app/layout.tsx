@@ -1,7 +1,6 @@
 import "@/styles/globals.css";
 import { Metadata } from "next";
 import { Fira_Code as FontMono, Inter as FontSans } from "next/font/google";
-
 import NavBar from "@/components/NavBar";
 
 const fontSans = FontSans({
@@ -16,8 +15,8 @@ const fontMono = FontMono({
 
 export const metadata: Metadata = {
   title: {
-    default: "HeyGen Interactive Avatar SDK Demo",
-    template: `%s - HeyGen Interactive Avatar SDK Demo`,
+    default: "Pallotti Immobiliare - Avatar Interattivo",
+    template: `%s - Pallotti Immobiliare`,
   },
   icons: {
     icon: "/heygen-logo.png",
@@ -33,11 +32,11 @@ export default function RootLayout({
     <html
       suppressHydrationWarning
       className={`${fontSans.variable} ${fontMono.variable} font-sans`}
-      lang="en"
+      lang="it"
     >
       <head />
-      <body className="min-h-screen bg-black text-white">
-        <main className="relative flex flex-col gap-6 h-screen w-screen">
+      <body className="min-h-screen bg-gray-100">
+        <main className="relative flex flex-col h-screen w-screen">
           <NavBar />
           {children}
         </main>
