@@ -8,7 +8,7 @@ import {
   StartAvatarRequest,
   STTProvider,
   ElevenLabsModel,
-  APIError, // Importa APIError per un type checking più specifico
+  APIError,
 } from "@heygen/streaming-avatar";
 import { useEffect, useRef, useState } from "react";
 import { useMemoizedFn, useUnmount } from "ahooks";
@@ -24,13 +24,13 @@ import { LoadingIcon } from "./Icons";
 import { MessageHistory } from "./AvatarSession/MessageHistory";
 import PropertyGrid from "@/app/immobili/PropertyGrid";
 import { Property } from "@/app/immobili/types";
-import immobiliData from '@/data/immobili.json'; // Assicurati che questo percorso sia corretto
-import { AVATARS } from "@/app/lib/constants";
+import immobiliData from '@/data/immobili.json'; // Assicurati che il percorso sia corretto
+import { AVATARS } from "@/app/lib/constants"; //
 
 const DEFAULT_CONFIG: StartAvatarRequest = {
   quality: AvatarQuality.Low,
-  avatarName: AVATARS[0].avatar_id, // Assicurati che questo sia un ID avatar valido per il tuo account
-  knowledgeId: "d7e6040fd8b54d319ecd7c9d98f4a90f", // <--- IMPOSTA QUESTO ID VALIDO!
+  avatarName: AVATARS[0].avatar_id, // Valore iniziale, può essere cambiato da AvatarConfig
+  knowledgeId: undefined,        // L'utente DEVE impostarlo tramite AvatarConfig
   voice: {
     rate: 1.5,
     emotion: VoiceEmotion.EXCITED,
@@ -53,35 +53,21 @@ function InteractiveAvatar() {
   const [error, setError] = useState<string | null>(null);
   const mediaStream = useRef<HTMLVideoElement>(null);
 
-  // Hook per loggare cambiamenti nello stato 'properties'
   useEffect(() => {
-    console.log("DEBUG: Stato 'properties' aggiornato:", JSON.stringify(properties, null, 2));
+    // Log di base per quando le proprietà cambiano, utile per il debug del rendering
+    // console.log("Stato 'properties' aggiornato:", JSON.stringify(properties, null, 2));
   }, [properties]);
-
-  // Hook per avvisare se knowledgeId non è valido all'inizio (se si usa AvatarConfig)
-   useEffect(() => {
-    if (config.knowledgeId === "IL_TUO_ID_KNOWLEDGE_BASE_VALIDO_DA_HEYGEN" && sessionState === StreamingAvatarSessionState.INACTIVE) {
-        console.warn("ATTENZIONE: 'knowledgeId' in DEFAULT_CONFIG è un placeholder. Assicurati di impostare un ID valido tramite AvatarConfig o direttamente nel codice.");
-        // Considera di impostare un errore se l'utente prova ad avviare la sessione senza cambiarlo
-    }
-  }, [config.knowledgeId, sessionState]);
-
 
   async function fetchAccessToken() {
     setError(null);
     try {
-      const response = await fetch("/api/get-access-token", {
-        method: "POST",
-      });
+      const response = await fetch("/api/get-access-token", { method: "POST" }); //
       if (!response.ok) {
         const errorText = await response.text();
         throw new Error(`Fallimento nel recuperare il token di accesso: ${response.status} ${errorText}`);
       }
       const token = await response.text();
-      if (!token) {
-        throw new Error("Token di accesso ricevuto è vuoto o non valido.");
-      }
-      console.log("Token di accesso recuperato."); // Evita di loggare il token stesso per sicurezza
+      if (!token) throw new Error("Token di accesso ricevuto è vuoto o non valido.");
       return token;
     } catch (err) {
       console.error("Errore in fetchAccessToken:", err);
@@ -92,62 +78,43 @@ function InteractiveAvatar() {
   }
 
   const extractPropertyId = (message: string): string | null => {
-    // Cerca "[ID:" seguito da uno o più caratteri alfanumerici (lettere, numeri) e lo cattura, fino alla "]"
     const match = message.match(/\[ID:([a-zA-Z0-9]+)\]/);
-    console.log("DEBUG: Messaggio ricevuto dall'avatar:", message);
-    console.log("DEBUG: Tentativo di estrazione ID con regex. Match:", match);
     return match ? match[1] : null;
   };
 
   const findPropertyById = (id: string): Property | undefined => {
-    console.log(`DEBUG: Ricerca immobile con ID "${id}" nel JSON locale.`);
     if (!immobiliData || !immobiliData.catalogo_immobili || !immobiliData.catalogo_immobili.immobili) {
-        console.error("ERRORE CRITICO: Struttura di immobiliData (da /data/immobili.json) non valida o file non caricato correttamente.");
-        setError("Errore interno: impossibile caricare i dati degli immobili. Controllare i log.");
-        return undefined;
+      console.error("Errore: Struttura di immobiliData (da /data/immobili.json) non valida o file non caricato.");
+      return undefined;
     }
-    const foundProperty = immobiliData.catalogo_immobili.immobili.find(p => p.id === id);
-    if (foundProperty) {
-        console.log("DEBUG: Immobile trovato nel JSON locale:", JSON.stringify(foundProperty, null, 2));
-    } else {
-        console.warn(`ATTENZIONE: Immobile con ID "${id}" non trovato nel JSON locale (/data/immobili.json). Verifica la sincronizzazione con i dati usati da HeyGen (Gist).`);
-    }
-    return foundProperty;
+    return immobiliData.catalogo_immobili.immobili.find(p => p.id === id); //
   };
 
   const startSessionV2 = useMemoizedFn(async (isVoiceChat: boolean) => {
     setError(null);
     setProperties([]);
 
-    if (!config.knowledgeId || config.knowledgeId === "IL_TUO_ID_KNOWLEDGE_BASE_VALIDO_DA_HEYGEN") {
-        const errMsg = "Knowledge ID non è impostato o è un placeholder. Configuralo prima di avviare la sessione.";
+    if (!config.knowledgeId) { // Controllo che knowledgeId sia stato impostato (non undefined/vuoto)
+        const errMsg = "Knowledge ID non è impostato. Configuralo tramite il pannello prima di avviare la sessione.";
         console.error(errMsg);
         setError(errMsg);
         return;
     }
-    if (!config.avatarName) {
-        const errMsg = "Avatar Name (ID) non è impostato. Configuralo prima di avviare la sessione.";
+    if (!config.avatarName) { // Controllo che avatarName sia stato impostato
+        const errMsg = "Avatar Name (ID) non è impostato. Configuralo tramite il pannello prima di avviare la sessione.";
         console.error(errMsg);
         setError(errMsg);
         return;
     }
 
-    console.log("Tentativo di avvio sessione con la configurazione:", JSON.stringify(config, null, 2));
+    console.log("Avvio sessione con configurazione:", config);
 
     try {
       const newToken = await fetchAccessToken();
-      console.log("Inizializzazione avatar...");
       const avatar = initAvatar(newToken);
 
-      avatar.on(StreamingEvents.AVATAR_START_TALKING, (e) => console.log("Evento: Avatar started talking", e));
-      avatar.on(StreamingEvents.AVATAR_STOP_TALKING, (e) => console.log("Evento: Avatar stopped talking", e));
-      avatar.on(StreamingEvents.STREAM_DISCONNECTED, (e) => {
-        console.log("Evento: Stream disconnected", e);
-        setProperties([]);
-      });
-      avatar.on(StreamingEvents.STREAM_READY, (event) => console.log("Evento: Stream ready:", event.detail));
       avatar.on(StreamingEvents.ERROR, (errEvent) => {
-        console.error("ERRORE dall'SDK HeyGen:", errEvent);
+        console.error("Errore dall'SDK HeyGen:", errEvent);
         const detail = (errEvent as CustomEvent)?.detail;
         let errMsg = "Errore SDK HeyGen.";
         if (detail) {
@@ -160,60 +127,41 @@ function InteractiveAvatar() {
         setError(errMsg);
       });
 
+      avatar.on(StreamingEvents.STREAM_DISCONNECTED, (e) => {
+        console.log("Stream disconnesso.", e);
+        setProperties([]);
+      });
+
       avatar.on(StreamingEvents.AVATAR_TALKING_MESSAGE, (event) => {
-        console.log("--- Inizio Elaborazione AVATAR_TALKING_MESSAGE ---");
         const messageText = event.detail.message;
+        console.log("Messaggio Avatar:", messageText);
         const propertyId = extractPropertyId(messageText);
 
         if (propertyId) {
-          console.log(`DEBUG: ID estraibile trovato: "${propertyId}"`);
           const property = findPropertyById(propertyId);
           if (property) {
-            console.log("DEBUG: Immobile corrispondente trovato. Chiamata a setProperties...");
             setProperties([property]);
-            console.log("DEBUG: Chiamata a setProperties effettuata.");
           } else {
-            // L'ID è stato estratto, ma non trovato nel JSON locale.
-            // Non reimpostare properties qui, potrebbe essere un falso negativo o l'ID è in un Gist non sincronizzato.
-            // Il warning in findPropertyById è sufficiente.
+            console.warn(`Immobile con ID "${propertyId}" non trovato nel JSON locale.`);
           }
-        } else {
-          console.log("DEBUG: Nessun ID immobile nel formato [ID:...] trovato in questo frammento di messaggio.");
         }
-        console.log("--- Fine Elaborazione AVATAR_TALKING_MESSAGE ---");
       });
 
-      avatar.on(StreamingEvents.USER_START, (event) => console.log("Evento: User started talking:", event));
-      avatar.on(StreamingEvents.USER_STOP, (event) => console.log("Evento: User stopped talking:", event));
-      avatar.on(StreamingEvents.USER_END_MESSAGE, (event) => console.log("Evento: User end message:", event));
-      avatar.on(StreamingEvents.USER_TALKING_MESSAGE, (event) => console.log("Evento: User talking message:", event));
-      avatar.on(StreamingEvents.AVATAR_END_MESSAGE, (event) => {
-        console.log("Evento: Avatar end message (fine del blocco di parlato):", event);
-        // Considera se resettare properties qui. Se un messaggio di fine indica
-        // la fine di un suggerimento e non ne sono seguiti altri, potrebbe aver senso.
-        // Ma se la conversazione continua, potrebbe essere meglio non farlo.
-        // Se l'avatar dice "[ID:123] Ecco la villa. Vuole sapere altro?" e questo è l'end_message,
-        // non vuoi pulire la card.
-        // Questa logica dipende molto dal comportamento della tua Knowledge Base.
-      });
+      // Minimal log for other events if needed for basic flow understanding
+      // avatar.on(StreamingEvents.AVATAR_START_TALKING, (e) => console.log("Avatar ha iniziato a parlare"));
+      // avatar.on(StreamingEvents.AVATAR_STOP_TALKING, (e) => console.log("Avatar ha smesso di parlare"));
 
-      console.log("Avvio avatar con startAvatar...");
       await startAvatar(config);
-      console.log("Chiamata startAvatar completata.");
 
       if (isVoiceChat) {
-        console.log("Avvio chat vocale...");
         await startVoiceChat();
-        console.log("Chat vocale avviata.");
       }
     } catch (err) {
-      console.error("Errore critico durante startSessionV2:", err);
+      console.error("Errore durante l'avvio della sessione:", err);
       let errorMessage = "Errore durante l'avvio della sessione dell'avatar.";
-      if (err instanceof APIError) {
+      if (typeof APIError !== 'undefined' && err instanceof APIError) {
         errorMessage = `Errore API HeyGen (${err.status}): ${err.message}`;
-        if (err.details) {
-            errorMessage += ` Dettagli: ${JSON.stringify(err.details)}`;
-        }
+        if (err.details) errorMessage += ` Dettagli: ${JSON.stringify(err.details)}`;
       } else if (err instanceof Error) {
         errorMessage = err.message;
       }
@@ -251,7 +199,7 @@ function InteractiveAvatar() {
           {sessionState !== StreamingAvatarSessionState.INACTIVE ? (
             <AvatarVideo ref={mediaStream} />
           ) : (
-            <AvatarConfig config={config} onConfigChange={setConfig} />
+            <AvatarConfig config={config} onConfigChange={setConfig} /> //
           )}
         </div>
         <div className="flex flex-col gap-3 items-center justify-center p-4 border-t border-zinc-700 w-full">
@@ -286,10 +234,10 @@ function InteractiveAvatar() {
 export default function InteractiveAvatarWrapper() {
   const basePath = process.env.NEXT_PUBLIC_BASE_API_URL;
   if (!basePath) {
-    console.warn("ATTENZIONE: NEXT_PUBLIC_BASE_API_URL non è definito nel tuo file .env.local. Controlla la configurazione. Verrà usato un fallback o potrebbe fallire.");
+    console.warn("ATTENZIONE: NEXT_PUBLIC_BASE_API_URL non è definito. Usato fallback.");
   }
   return (
-    <StreamingAvatarProvider basePath={basePath || "https://api.heygen.com"}> {/* Aggiunto fallback per basePath */}
+    <StreamingAvatarProvider basePath={basePath || "https://api.heygen.com"}>
       <InteractiveAvatar />
     </StreamingAvatarProvider>
   );
