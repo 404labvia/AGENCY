@@ -1,4 +1,4 @@
-// components/InteractiveAvatar.tsx
+// components/InteractiveAvatar.tsx (modificato)
 
 import {
   AvatarQuality,
@@ -22,7 +22,7 @@ import { useVoiceChat } from "./logic/useVoiceChat";
 import { StreamingAvatarProvider, StreamingAvatarSessionState } from "./logic";
 import { LoadingIcon } from "./Icons";
 import { MessageHistory } from "./AvatarSession/MessageHistory";
-import PropertyGrid from "@/app/immobili/PropertyGrid";
+import PropertyWebView from "@/app/immobili/PropertyWebView";
 import { Property } from "@/app/immobili/types";
 import immobiliData from '@/data/immobili.json'; // Assicurati che il percorso sia corretto
 import { AVATARS } from "@/app/lib/constants"; //
@@ -48,15 +48,15 @@ function InteractiveAvatar() {
   const { initAvatar, startAvatar, stopAvatar, sessionState, stream } =
     useStreamingAvatarSession();
   const { startVoiceChat } = useVoiceChat();
-  const [properties, setProperties] = useState<Property[]>([]);
+  const [currentProperty, setCurrentProperty] = useState<Property | null>(null);
   const [config, setConfig] = useState<StartAvatarRequest>(DEFAULT_CONFIG);
   const [error, setError] = useState<string | null>(null);
   const mediaStream = useRef<HTMLVideoElement>(null);
 
   useEffect(() => {
-    // Log di base per quando le proprietà cambiano, utile per il debug del rendering
-    // console.log("Stato 'properties' aggiornato:", JSON.stringify(properties, null, 2));
-  }, [properties]);
+    // Log per debug quando la proprietà corrente cambia
+    console.log("Proprietà corrente aggiornata:", currentProperty?.id);
+  }, [currentProperty]);
 
   async function fetchAccessToken() {
     setError(null);
@@ -77,9 +77,25 @@ function InteractiveAvatar() {
     }
   }
 
+  // Funzione migliorata per estrarre ID immobili dal testo del messaggio
   const extractPropertyId = (message: string): string | null => {
-    const match = message.match(/\[ID:([a-zA-Z0-9]+)\]/);
-    return match ? match[1] : null;
+    // Pattern 1: [ID:XXX]
+    const idMatch = message.match(/\[ID:([a-zA-Z0-9\s]+)\]/i);
+    if (idMatch) return idMatch[1].trim();
+
+    // Pattern 2: "Codice XXX"
+    const codeMatch = message.match(/cod(?:ice)?[\s:]+([a-zA-Z0-9\s]+)/i);
+    if (codeMatch) return codeMatch[1].trim();
+
+    // Pattern 3: "Rif. XXX"
+    const rifMatch = message.match(/rif(?:erimento)?[\s.:]+([a-zA-Z0-9\s]+)/i);
+    if (rifMatch) return rifMatch[1].trim();
+
+    // Pattern 4: "ID: XXX"
+    const directIdMatch = message.match(/id[\s:]+([a-zA-Z0-9\s]+)/i);
+    if (directIdMatch) return directIdMatch[1].trim();
+
+    return null;
   };
 
   const findPropertyById = (id: string): Property | undefined => {
@@ -87,12 +103,36 @@ function InteractiveAvatar() {
       console.error("Errore: Struttura di immobiliData (da /data/immobili.json) non valida o file non caricato.");
       return undefined;
     }
-    return immobiliData.catalogo_immobili.immobili.find(p => p.id === id); //
+
+    // Normalizza l'ID rimuovendo eventuali spazi
+    const normalizedId = id.replace(/\s+/g, '').toUpperCase();
+
+    // Cerca corrispondenza esatta
+    let property = immobiliData.catalogo_immobili.immobili.find(
+      p => p.id.replace(/\s+/g, '').toUpperCase() === normalizedId
+    );
+
+    // Se non trovata, cerca corrispondenza parziale
+    if (!property) {
+      property = immobiliData.catalogo_immobili.immobili.find(
+        p => p.id.replace(/\s+/g, '').toUpperCase().includes(normalizedId) ||
+            normalizedId.includes(p.id.replace(/\s+/g, '').toUpperCase())
+      );
+    }
+
+    if (property) {
+      console.log(`Trovato immobile con ID ${id}:`, property.id);
+    } else {
+      console.warn(`Immobile con ID "${id}" non trovato. IDs disponibili:`,
+        immobiliData.catalogo_immobili.immobili.map(p => p.id).join(', '));
+    }
+
+    return property;
   };
 
   const startSessionV2 = useMemoizedFn(async (isVoiceChat: boolean) => {
     setError(null);
-    setProperties([]);
+    setCurrentProperty(null);
 
     if (!config.knowledgeId) { // Controllo che knowledgeId sia stato impostato (non undefined/vuoto)
         const errMsg = "Knowledge ID non è impostato. Configuralo tramite il pannello prima di avviare la sessione.";
@@ -129,7 +169,7 @@ function InteractiveAvatar() {
 
       avatar.on(StreamingEvents.STREAM_DISCONNECTED, (e) => {
         console.log("Stream disconnesso.", e);
-        setProperties([]);
+        setCurrentProperty(null);
       });
 
       avatar.on(StreamingEvents.AVATAR_TALKING_MESSAGE, (event) => {
@@ -138,9 +178,11 @@ function InteractiveAvatar() {
         const propertyId = extractPropertyId(messageText);
 
         if (propertyId) {
+          console.log("ID immobile estratto:", propertyId);
           const property = findPropertyById(propertyId);
           if (property) {
-            setProperties([property]);
+            console.log("Immobile trovato, impostazione della proprietà corrente:", property);
+            setCurrentProperty(property);
           } else {
             console.warn(`Immobile con ID "${propertyId}" non trovato nel JSON locale.`);
           }
@@ -171,7 +213,7 @@ function InteractiveAvatar() {
 
   useUnmount(() => {
     stopAvatar();
-    setProperties([]);
+    setCurrentProperty(null);
   });
 
   useEffect(() => {
@@ -225,7 +267,7 @@ function InteractiveAvatar() {
         )}
       </div>
       <div className="w-1/2 h-full">
-        <PropertyGrid properties={properties} />
+        <PropertyWebView property={currentProperty} />
       </div>
     </div>
   );
